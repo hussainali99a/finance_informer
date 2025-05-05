@@ -1,39 +1,37 @@
 from flask import Flask, request, jsonify
 import requests
+import os
 
 app = Flask(__name__)
-
-# Replace this with your preferred exchange rate API
-EXCHANGE_API_URL = "f24830c12b1367507d428884"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     req = request.get_json()
-    intent = req.get("queryResult").get("intent").get("displayName")
 
-    if intent == "CurrencyConversion":
-        return handle_currency_conversion(req)
-    else:
-        return jsonify({"fulfillmentText": "Intent not supported."})
+    # Extract parameters from Dialogflow
+    unit_currency = req['queryResult']['parameters'].get('unit-currency', {})
+    amount = unit_currency.get('amount')
+    source = unit_currency.get('currency')
+    target = req['queryResult']['parameters'].get('currency-name')
 
-def handle_currency_conversion(req):
-    parameters = req["queryResult"]["parameters"]
-    amount = parameters.get("amount")
-    from_currency = parameters.get("from-currency")
-    to_currency = parameters.get("to-currency")
+    if not all([amount, source, target]):
+        return jsonify({"fulfillmentText": "Please provide both source and target currencies along with amount."})
 
-    # Call exchange rate API
-    response = requests.get(EXCHANGE_API_URL + from_currency.upper())
-    data = response.json()
+    # API Call to ExchangeRate-API or similar
+    api_key = os.getenv('f24830c12b1367507d428884')  # set in environment or hardcode temporarily
+    url = f"https://v6.exchangerate-api.com/v6/{api_key}/pair/{source}/{target}/{amount}"
+    
+    res = requests.get(url).json()
+    if res['result'] != 'success':
+        return jsonify({"fulfillmentText": "Failed to retrieve exchange rate. Please try again later."})
 
-    if "rates" in data and to_currency.upper() in data["rates"]:
-        rate = data["rates"][to_currency.upper()]
-        converted_amount = round(amount * rate, 2)
-        result_text = f"{amount} {from_currency.upper()} is approximately {converted_amount} {to_currency.upper()}."
-    else:
-        result_text = "Sorry, I couldn't fetch the conversion rate at the moment."
+    converted = res['conversion_result']
+    reply = f"{amount} {source} is approximately {converted} {target}"
 
-    return jsonify({"fulfillmentText": result_text})
+    return jsonify({
+        "fulfillmentText": reply
+    })
 
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
